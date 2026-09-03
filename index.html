@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="zh-TW">
 <head>
@@ -17,27 +18,54 @@
             position: absolute;
             top: 15px;
             left: 15px;
-            background: rgba(0, 0, 0, 0.75);
+            background: rgba(0, 0, 0, 0.85);
             padding: 15px;
             border-radius: 8px;
             backdrop-filter: blur(5px);
-            max-width: 300px;
-            font-size: 14px;
+            width: 300px;
+            font-size: 13px;
             line-height: 1.5;
             z-index: 10;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.5);
         }
         #info-panel h2 {
-            margin: 0 0 10px 0;
-            font-size: 16px;
+            margin: 0 0 8px 0;
+            font-size: 15px;
             color: #4da6ff;
-            border-bottom: 1px solid #555;
-            padding-bottom: 5px;
+            border-bottom: 1px solid #444;
+            padding-bottom: 4px;
+        }
+        textarea {
+            width: 100%;
+            height: 100px;
+            background: #222;
+            color: #7bed9f;
+            border: 1px solid #555;
+            border-radius: 4px;
+            font-family: monospace;
+            font-size: 11px;
+            padding: 5px;
+            box-sizing: border-box;
+            resize: vertical;
+        }
+        button {
+            width: 100%;
+            margin-top: 6px;
+            padding: 8px;
+            background: #2ed573;
+            border: none;
+            color: #111;
+            font-weight: bold;
+            cursor: pointer;
+            border-radius: 4px;
+            transition: 0.2s;
+        }
+        button:hover {
+            background: #26af5f;
+            color: #fff;
         }
         .data-group {
-            margin-bottom: 8px;
-        }
-        .data-label {
-            color: #aaa;
+            margin-bottom: 5px;
         }
     </style>
     <!-- 引入 Three.js 與 OrbitControls (鏡頭控制) -->
@@ -47,29 +75,28 @@
 <body>
 
     <div id="info-panel">
-    <h2>擊球數據輸入</h2>
-    <textarea id="json-input" rows="6" style="width:100%; background:#222; color:#fff; border:1px solid #555; font-family:monospace; font-size:11px;" placeholder='貼上 "Hit": { ... }'></textarea>
-    <button onclick="updateFromInput()" style="width:100%; margin-top:5px; padding:6px; background:#4da6ff; border:none; color:#fff; font-weight:bold; cursor:pointer; border-radius:4px;">產生 3D 軌跡</button>
-    
-    <h2 style="margin-top:15px;">目前參數</h2>
-    <div id="data-display">載入中...</div>
-  </div>
-
+        <h2>貼上擊球 JSON 數據</h2>
+        <textarea id="json-input" placeholder='直接貼上 "Hit": { ... }'></textarea>
+        <button onclick="updateFromInput()">產生 3D 模擬軌跡</button>
+        
+        <h2 style="margin-top: 15px;">目前顯示數據</h2>
+        <div id="data-display">載入中...</div>
+    </div>
 
     <script>
-        // --- 1. 預設數據 (若網址沒傳參時使用) ---
+        // --- 1. 預設數據 ---
         const defaultHitData = {
             "Hit": {
                 "Launch": {
-                    "Angle": 17.281986,
-                    "Direction": -174.22984,
-                    "ExitSpeed": 116.80314585984,
-                    "HitSpinRate": 1088.3491
+                    "Angle": 29.583567,
+                    "Direction": -37.228,
+                    "ExitSpeed": 93.10412314368,
+                    "HitSpinRate": 5328.806
                 },
                 "LandingFlat": {
-                    "Bearing": -174.6862,
-                    "Distance": 48.163377384,
-                    "HangTime": 1.87322,
+                    "Bearing": -45.25206,
+                    "Distance": 46.182540096,
+                    "HangTime": 2.605532,
                     "Confidence": null
                 }
             }
@@ -79,16 +106,16 @@
         function parseUrlData() {
             const params = new URLSearchParams(window.location.search);
             
-            // 支援方式 A：直接傳入 JSON 字串 ?data={"Hit":{...}}
+            // 處理 JSON 傳參
             if (params.has('data')) {
                 try {
                     return JSON.parse(params.get('data'));
                 } catch(e) {
-                    console.error("JSON 解析失敗，改用預設數據");
+                    console.error("JSON 解析失敗，載入預設值");
                 }
             }
 
-            // 支援方式 B：拆開傳遞 ?la=17.28&dir=-174.23&dist=48.16
+            // 處理簡短傳參 ?la=29.58&dir=-37.22&dist=46.18
             if (params.has('la') || params.has('dist')) {
                 return {
                     "Hit": {
@@ -110,26 +137,47 @@
             return defaultHitData;
         }
 
+        // --- 3. 按鈕事件：自動修復文字並更新 URL ---
+        function updateFromInput() {
+            let rawText = document.getElementById('json-input').value.trim();
+            if (!rawText) return;
+
+            // 如果使用者直接貼上 "Hit": { ... }，自動幫補上開頭與結尾的大括號 {}
+            if (rawText.startsWith('"Hit"') || rawText.startsWith('Hit')) {
+                rawText = '{' + rawText + '}';
+            }
+
+            try {
+                // 驗證 JSON 格式合法性
+                JSON.parse(rawText);
+                // 進行 URL 安全編碼並寫入網址
+                const encoded = encodeURIComponent(rawText);
+                window.location.search = '?data=' + encoded;
+            } catch(e) {
+                alert('JSON 格式錯誤，請確定內容輸入正確！');
+            }
+        }
+
         const hitData = parseUrlData();
         const launch = hitData.Hit.Launch;
         const landing = hitData.Hit.LandingFlat;
 
-        // 更新 UI 面板內容
+        // 更新左側面板 UI 數據顯示
         document.getElementById('data-display').innerHTML = `
             <div class="data-group"><b>擊球初速:</b> ${launch.ExitSpeed.toFixed(1)} mph</div>
             <div class="data-group"><b>仰角 (Angle):</b> ${launch.Angle.toFixed(2)}°</div>
             <div class="data-group"><b>方向角 (Direction):</b> ${launch.Direction.toFixed(2)}°</div>
             <div class="data-group"><b>飛行距離 (Distance):</b> ${landing.Distance.toFixed(2)} m</div>
             <div class="data-group"><b>滯空時間:</b> ${landing.HangTime ? landing.HangTime.toFixed(2) + ' s' : 'N/A'}</div>
-            <div class="data-group"><b>轉速 (Spin Rate):</b> ${launch.HitSpinRate.toFixed(0)} rpm</div>
+            <div class="data-group"><b>轉速 (Spin Rate):</b> ${launch.HitSpinRate ? launch.HitSpinRate.toFixed(0) + ' rpm' : 'N/A'}</div>
         `;
 
-        // --- 3. 初始化 Three.js 場景 ---
+        // --- 4. 初始化 Three.js 3D 場景 ---
         const scene = new THREE.Scene();
-        scene.background = new THREE.Color(0x1e272e);
+        scene.background = new THREE.Color(0x111827);
 
         const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
-        camera.position.set(0, 40, 80);
+        camera.position.set(0, 35, 75);
 
         const renderer = new THREE.WebGLRenderer({ antialias: true });
         renderer.setSize(window.innerWidth, window.innerHeight);
@@ -139,114 +187,111 @@
         const controls = new THREE.OrbitControls(camera, renderer.domElement);
         controls.enableDamping = true;
 
-        // 光源設定
+        // 光源
         const ambientLight = new THREE.AmbientLight(0xffffff, 0.7);
         scene.add(ambientLight);
         const dirLight = new THREE.DirectionalLight(0xffffff, 0.6);
-        dirLight.position.set(20, 50, 20);
+        dirLight.position.set(30, 60, 30);
         scene.add(dirLight);
 
-        // --- 4. 建構棒球場模型 (本壘板、界外線、外野牆) ---
+        // --- 5. 建構棒球場基本元素 ---
         const fieldGroup = new THREE.Group();
 
-        // 草地地面
+        // 草皮
         const grassGeo = new THREE.PlaneGeometry(200, 200);
-        const grassMat = new THREE.MeshLambertMaterial({ color: 0x2ed573 });
+        const grassMat = new THREE.MeshLambertMaterial({ color: 0x10b981 });
         const grass = new THREE.Mesh(grassGeo, grassMat);
         grass.rotation.x = -Math.PI / 2;
         fieldGroup.add(grass);
 
-        // 本壘板 (Home Plate)
+        // 本壘板
         const homePlateShape = new THREE.Shape();
         homePlateShape.moveTo(0, 0);
-        homePlateShape.lineTo(0.2, -0.2);
-        homePlateShape.lineTo(0.2, -0.4);
-        homePlateShape.lineTo(-0.2, -0.4);
-        homePlateShape.lineTo(-0.2, -0.2);
+        homePlateShape.lineTo(0.3, -0.3);
+        homePlateShape.lineTo(0.3, -0.6);
+        homePlateShape.lineTo(-0.3, -0.6);
+        homePlateShape.lineTo(-0.3, -0.3);
         const homePlateGeo = new THREE.ShapeGeometry(homePlateShape);
         const homePlateMat = new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.DoubleSide });
         const homePlate = new THREE.Mesh(homePlateGeo, homePlateMat);
         homePlate.rotation.x = -Math.PI / 2;
-        homePlate.position.set(0, 0.01, 0);
+        homePlate.position.set(0, 0.02, 0);
         fieldGroup.add(homePlate);
 
         // 投手丘
         const moundGeo = new THREE.CylinderGeometry(2, 2.5, 0.2, 32);
-        const moundMat = new THREE.MeshLambertMaterial({ color: 0xd2dae2 });
+        const moundMat = new THREE.MeshLambertMaterial({ color: 0xd97706 });
         const mound = new THREE.Mesh(moundGeo, moundMat);
         mound.position.set(0, 0.05, -18.4);
         fieldGroup.add(mound);
 
-        // 界外線 (Foul Lines - 一壘與三壘方向延伸)
+        // 白線 / 界外線
         const foulLineMat = new THREE.LineBasicMaterial({ color: 0xffffff, linewidth: 2 });
         
-        // 沿 45 度角的界線 (右外野/一壘方向)
         const rightFoulGeo = new THREE.BufferGeometry().setFromPoints([
             new THREE.Vector3(0, 0.02, 0),
-            new THREE.Vector3(70, 0.02, -70)
+            new THREE.Vector3(80, 0.02, -80)
         ]);
         fieldGroup.add(new THREE.Line(rightFoulGeo, foulLineMat));
 
-        // 沿 -45 度角的界線 (左外野/三壘方向)
         const leftFoulGeo = new THREE.BufferGeometry().setFromPoints([
             new THREE.Vector3(0, 0.02, 0),
-            new THREE.Vector3(-70, 0.02, -70)
+            new THREE.Vector3(-80, 0.02, -80)
         ]);
         fieldGroup.add(new THREE.Line(leftFoulGeo, foulLineMat));
 
-        // 外野牆 (Arc Fence)
+        // 外野牆
         const fenceGeo = new THREE.CylinderGeometry(90, 90, 3, 32, 1, true, Math.PI * 0.25, Math.PI * 0.5);
-        const fenceMat = new THREE.MeshLambertMaterial({ color: 0x1e3799, side: THREE.DoubleSide });
+        const fenceMat = new THREE.MeshLambertMaterial({ color: 0x1e3a8a, side: THREE.DoubleSide });
         const fence = new THREE.Mesh(fenceGeo, fenceMat);
         fence.position.set(0, 1.5, 0);
         fieldGroup.add(fence);
 
         scene.add(fieldGroup);
 
-        // --- 5. 繪製 3D 擊球軌跡線 ---
-        // 座標轉換：將棒球數據的角度轉為 3D 空間向量 (X: 左右, Y: 高度, Z: 前後)
-        // 棒球數據 Direction 通常 0 為正中央，負數代表拉打方向
+        // --- 6. 計算並繪製 3D 軌跡弧線 ---
+        // 角度轉弧度（以本壘板為中心計算方向）
         const radDir = (launch.Direction + 90) * (Math.PI / 180);
         const dist = landing.Distance;
 
-        // 落點座標
+        // 計算落點座標
         const endX = dist * Math.cos(radDir);
         const endZ = -dist * Math.sin(radDir);
         const endY = 0;
 
-        // 計算最高點 (根據仰角粗略估算彈道中點高度)
+        // 計算弧線中點 (最高頂點)
         const midX = endX / 2;
         const midZ = endZ / 2;
-        const apexHeight = (dist * Math.tan(launch.Angle * (Math.PI / 180))) / 2;
+        const apexHeight = Math.max(2, (dist * Math.tan(launch.Angle * (Math.PI / 180))) / 2);
 
-        // 建立拋物線 (Quadratic Bezier Curve)
+        // 拋物線
         const curve = new THREE.QuadraticBezierCurve3(
-            new THREE.Vector3(0, 0.2, 0),             // 起點 (本壘板)
-            new THREE.Vector3(midX, apexHeight, midZ), // 控制點 (軌跡頂點)
-            new THREE.Vector3(endX, endY, endZ)        // 落點
+            new THREE.Vector3(0, 0.2, 0),
+            new THREE.Vector3(midX, apexHeight, midZ),
+            new THREE.Vector3(endX, endY, endZ)
         );
 
         const points = curve.getPoints(50);
         const trajectoryGeo = new THREE.BufferGeometry().setFromPoints(points);
         const trajectoryMat = new THREE.LineDashedMaterial({
-            color: 0xff4757,
+            color: 0xef4444,
             dashSize: 1,
             gapSize: 0.5,
             linewidth: 3
         });
         const trajectoryLine = new THREE.Line(trajectoryGeo, trajectoryMat);
-        trajectoryLine.computeLineDistances(); // 讓虛線生效
+        trajectoryLine.computeLineDistances();
         scene.add(trajectoryLine);
 
         // 落點標記 (紅色圓圈)
-        const landingMarkerGeo = new THREE.RingGeometry(0.5, 0.8, 32);
-        const landingMarkerMat = new THREE.MeshBasicMaterial({ color: 0xff4757, side: THREE.DoubleSide });
+        const landingMarkerGeo = new THREE.RingGeometry(0.4, 0.8, 32);
+        const landingMarkerMat = new THREE.MeshBasicMaterial({ color: 0xef4444, side: THREE.DoubleSide });
         const landingMarker = new THREE.Mesh(landingMarkerGeo, landingMarkerMat);
         landingMarker.rotation.x = -Math.PI / 2;
         landingMarker.position.set(endX, 0.03, endZ);
         scene.add(landingMarker);
 
-        // --- 6. 視窗縮放適應與渲染迴圈 ---
+        // --- 7. 渲染迴圈 ---
         window.addEventListener('resize', () => {
             camera.aspect = window.innerWidth / window.innerHeight;
             camera.updateProjectionMatrix();
