@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>棒球擊球軌跡 3D 模擬器 (真實比例)</title>
+    <title>棒球擊球軌跡 3D 模擬器 (純數據顯示)</title>
     <style>
         body {
             margin: 0;
@@ -39,7 +39,7 @@
             padding: 15px;
             border-radius: 8px;
             backdrop-filter: blur(5px);
-            width: 290px;
+            width: 250px;
             font-size: 13px;
             line-height: 1.5;
             z-index: 10;
@@ -48,7 +48,7 @@
         }
 
         #info-panel.collapsed {
-            transform: translateX(-330px);
+            transform: translateX(-300px);
             opacity: 0;
             pointer-events: none;
         }
@@ -61,45 +61,24 @@
             padding-bottom: 5px;
         }
 
-        textarea {
-            width: 100%;
-            height: 80px;
-            background: #222;
-            color: #7bed9f;
-            border: 1px solid #555;
-            border-radius: 4px;
-            font-family: monospace;
-            font-size: 11px;
-            padding: 5px;
-            box-sizing: border-box;
-            resize: vertical;
-        }
-
         .action-btn {
             width: 100%;
-            margin-top: 6px;
+            margin-top: 10px;
             padding: 8px;
-            background: #2ed573;
+            background: #ff4757;
             border: none;
-            color: #111;
+            color: #fff;
             font-weight: bold;
             cursor: pointer;
             border-radius: 4px;
         }
 
         .action-btn:hover {
-            background: #26af5f;
-            color: #fff;
-        }
-
-        .close-btn {
-            background: #ff4757;
-            color: #fff;
-            margin-top: 10px;
+            background: #e84118;
         }
 
         .data-group {
-            margin-bottom: 5px;
+            margin-bottom: 6px;
         }
     </style>
     <!-- 引入 Three.js 與 OrbitControls -->
@@ -111,14 +90,10 @@
     <button id="toggle-btn" onclick="togglePanel()">面板 ⚙️</button>
 
     <div id="info-panel">
-        <h2>貼上擊球 JSON 數據</h2>
-        <textarea id="json-input" placeholder='直接貼上 "Hit": { ... }'></textarea>
-        <button class="action-btn" onclick="updateFromInput()">產生 3D 模擬軌跡</button>
-        
-        <h2 style="margin-top: 12px;">目前擊球數據</h2>
+        <h2>目前擊球數據</h2>
         <div id="data-display">載入中...</div>
 
-        <button class="action-btn close-btn" onclick="togglePanel()">收合面板 (不擋畫面) ✕</button>
+        <button class="action-btn" onclick="togglePanel()">收合面板 ✕</button>
     </div>
 
     <script>
@@ -145,7 +120,7 @@
             }
         };
 
-        // --- 3. 解析網址與輸入參數 ---
+        // --- 3. 解析網址參數 (URL Parameters) ---
         function parseUrlData() {
             const params = new URLSearchParams(window.location.search);
             if (params.has('data')) {
@@ -173,20 +148,6 @@
                 };
             }
             return defaultHitData;
-        }
-
-        function updateFromInput() {
-            let rawText = document.getElementById('json-input').value.trim();
-            if (!rawText) return;
-            if (rawText.startsWith('"Hit"') || rawText.startsWith('Hit')) {
-                rawText = '{' + rawText + '}';
-            }
-            try {
-                JSON.parse(rawText);
-                window.location.search = '?data=' + encodeURIComponent(rawText);
-            } catch(e) {
-                alert('JSON 格式錯誤，請檢查內容！');
-            }
         }
 
         const hitData = parseUrlData();
@@ -226,14 +187,14 @@
         // --- 5. 建構真實比例棒球場 (單位：公尺 m) ---
         const fieldGroup = new THREE.Group();
 
-        // 5.1 外野整體大草皮
+        // 5.1 外野草皮
         const grassGeo = new THREE.PlaneGeometry(300, 300);
         const grassMat = new THREE.MeshLambertMaterial({ color: 0x15803d });
         const grass = new THREE.Mesh(grassGeo, grassMat);
         grass.rotation.x = -Math.PI / 2;
         fieldGroup.add(grass);
 
-        // 5.2 內野紅土區域 (Infield Dirt Area) - 半徑約 28m 的扇形泥土區
+        // 5.2 內野紅土區
         const dirtGeo = new THREE.CircleGeometry(28.9, 32, Math.PI * 0.25, Math.PI * 0.5);
         const dirtMat = new THREE.MeshLambertMaterial({ color: 0xb45309 });
         const dirt = new THREE.Mesh(dirtGeo, dirtMat);
@@ -241,7 +202,7 @@
         dirt.position.set(0, 0.01, 0);
         fieldGroup.add(dirt);
 
-        // 5.3 本壘板 (Home Plate)
+        // 5.3 本壘板
         const homePlateShape = new THREE.Shape();
         homePlateShape.moveTo(0, 0);
         homePlateShape.lineTo(0.216, -0.216);
@@ -255,58 +216,52 @@
         homePlate.position.set(0, 0.02, 0);
         fieldGroup.add(homePlate);
 
-        // 5.4 投手丘 (Pitcher's Mound: 本壘前方 18.44m, 直徑 5.5m, 高度 0.25m)
+        // 5.4 投手丘與投手板
         const moundGeo = new THREE.CylinderGeometry(2.75, 2.75, 0.25, 32);
         const moundMat = new THREE.MeshLambertMaterial({ color: 0xb45309 });
         const mound = new THREE.Mesh(moundGeo, moundMat);
         mound.position.set(0, 0.125, -18.44);
         fieldGroup.add(mound);
 
-        // 投手板 (Pitcher's Rubber)
         const rubberGeo = new THREE.BoxGeometry(0.61, 0.05, 0.15);
         const rubber = new THREE.Mesh(rubberGeo, whiteMat);
         rubber.position.set(0, 0.26, -18.44);
         fieldGroup.add(rubber);
 
-        // 5.5 壘包設定 (一壘、二壘、三壘 - 壘間距 27.43m)
+        // 5.5 壘包 (一壘、二壘、三壘)
         const baseGeo = new THREE.BoxGeometry(0.38, 0.08, 0.38);
         
-        // 一壘 (X: 19.39m, Z: -19.39m)
         const base1 = new THREE.Mesh(baseGeo, whiteMat);
         base1.position.set(19.39, 0.04, -19.39);
         base1.rotation.y = Math.PI / 4;
         fieldGroup.add(base1);
 
-        // 二壘 (X: 0m, Z: -38.79m)
         const base2 = new THREE.Mesh(baseGeo, whiteMat);
         base2.position.set(0, 0.04, -38.79);
         base2.rotation.y = Math.PI / 4;
         fieldGroup.add(base2);
 
-        // 三壘 (X: -19.39m, Z: -19.39m)
         const base3 = new THREE.Mesh(baseGeo, whiteMat);
         base3.position.set(-19.39, 0.04, -19.39);
         base3.rotation.y = Math.PI / 4;
         fieldGroup.add(base3);
 
-        // 5.6 界外線 (Foul Lines) - 延伸至外野 100m
+        // 5.6 界外線
         const foulLineMat = new THREE.LineBasicMaterial({ color: 0xffffff, linewidth: 2 });
         
-        // 右外野界線 (+45度)
         const rightFoulGeo = new THREE.BufferGeometry().setFromPoints([
             new THREE.Vector3(0, 0.02, 0),
             new THREE.Vector3(70.71, 0.02, -70.71)
         ]);
         fieldGroup.add(new THREE.Line(rightFoulGeo, foulLineMat));
 
-        // 左外野界線 (-45度)
         const leftFoulGeo = new THREE.BufferGeometry().setFromPoints([
             new THREE.Vector3(0, 0.02, 0),
             new THREE.Vector3(-70.71, 0.02, -70.71)
         ]);
         fieldGroup.add(new THREE.Line(leftFoulGeo, foulLineMat));
 
-        // 5.7 外野全壘打牆 (Fence: 半徑 105m, 高度 3m)
+        // 5.7 外野全壘打牆
         const fenceGeo = new THREE.CylinderGeometry(105, 105, 3, 48, 1, true, Math.PI * 0.25, Math.PI * 0.5);
         const fenceMat = new THREE.MeshLambertMaterial({ color: 0x1e3a8a, side: THREE.DoubleSide });
         const fence = new THREE.Mesh(fenceGeo, fenceMat);
@@ -316,21 +271,17 @@
         scene.add(fieldGroup);
 
         // --- 6. 3D 擊球軌跡計算與繪製 ---
-        // 角度轉向量 (Direction 通常以 0 度為正中央/二壘方向，負角度為拉打)
         const radDir = (launch.Direction + 90) * (Math.PI / 180);
         const dist = landing.Distance;
 
-        // 計算實際落點座標 (單位：m)
         const endX = dist * Math.cos(radDir);
         const endZ = -dist * Math.sin(radDir);
         const endY = 0;
 
-        // 弧線最高頂點 (以仰角與距離估算)
         const midX = endX / 2;
         const midZ = endZ / 2;
         const apexHeight = Math.max(1.5, (dist * Math.tan(launch.Angle * (Math.PI / 180))) / 2);
 
-        // 建立拋物線軌跡
         const curve = new THREE.QuadraticBezierCurve3(
             new THREE.Vector3(0, 0.5, 0),
             new THREE.Vector3(midX, apexHeight, midZ),
@@ -349,7 +300,7 @@
         trajectoryLine.computeLineDistances();
         scene.add(trajectoryLine);
 
-        // 落點標記 (紅色圓圈)
+        // 落點標記
         const landingMarkerGeo = new THREE.RingGeometry(0.5, 1.0, 32);
         const landingMarkerMat = new THREE.MeshBasicMaterial({ color: 0xef4444, side: THREE.DoubleSide });
         const landingMarker = new THREE.Mesh(landingMarkerGeo, landingMarkerMat);
