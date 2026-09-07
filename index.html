@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>棒球擊球軌跡 3D 模擬器</title>
+    <title>棒球擊球軌跡 3D 模擬器 (含自動推算功能)</title>
     <style>
         body {
             margin: 0;
@@ -13,37 +13,72 @@
             background-color: #ffffff;
         }
 
-        /* 頂部數據顯示橫條 */
-        #data-header {
+        /* 頂部輸入面板 */
+        #control-panel {
             position: absolute;
             top: 0;
             left: 0;
             width: 100%;
-            background: rgba(255, 255, 255, 0.9);
+            background: rgba(255, 255, 255, 0.95);
             backdrop-filter: blur(8px);
             border-bottom: 1px solid #e5e7eb;
-            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);
-            padding: 10px 0;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.08);
+            padding: 12px 15px;
             z-index: 10;
             display: flex;
             justify-content: center;
             align-items: center;
             flex-wrap: wrap;
-            gap: 15px 25px;
+            gap: 10px 18px;
+            box-sizing: border-box;
         }
 
-        .data-item {
+        .input-group {
             display: flex;
             align-items: center;
+            gap: 6px;
             font-size: 13px;
-            color: #4b5563;
+            color: #374151;
+            font-weight: 500;
         }
 
-        .data-item span {
+        .input-group input {
+            width: 65px;
+            padding: 5px 8px;
+            border: 1px solid #d1d5db;
+            border-radius: 6px;
+            font-size: 13px;
+            outline: none;
+            transition: all 0.2s;
+        }
+
+        .input-group input:focus {
+            border-color: #2563eb;
+            box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.2);
+        }
+
+        .input-group span.estimated {
+            font-size: 11px;
+            color: #2563eb;
             font-weight: bold;
-            color: #111827;
-            margin-left: 4px;
-            font-size: 14px;
+            background: #eff6ff;
+            padding: 2px 6px;
+            border-radius: 4px;
+        }
+
+        #btn-render {
+            background-color: #2563eb;
+            color: white;
+            border: none;
+            padding: 6px 16px;
+            border-radius: 6px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        #btn-render:hover {
+            background-color: #1d4ed8;
         }
 
         canvas {
@@ -55,63 +90,103 @@
 </head>
 <body>
 
-    <!-- 頂部打擊數據列 -->
-    <div id="data-header">
-        <div class="data-item">擊球初速:<span id="val-speed">-</span></div>
-        <div class="data-item">仰角:<span id="val-angle">-</span></div>
-        <div class="data-item">方向角:<span id="val-dir">-</span></div>
-        <div class="data-item">飛行距離:<span id="val-dist">-</span></div>
-        <div class="data-item">滯空時間:<span id="val-time">-</span></div>
-        <div class="data-item">轉速:<span id="val-spin">-</span></div>
+    <!-- 頂部控制與數據輸入面板 -->
+    <div id="control-panel">
+        <div class="input-group">
+            <label>Angle (°):</label>
+            <input type="number" id="inp-angle" step="0.1" placeholder="仰角" value="29.11">
+        </div>
+        <div class="input-group">
+            <label>Direction (°):</label>
+            <input type="number" id="inp-dir" step="0.1" placeholder="方向" value="-9.43">
+        </div>
+        <div class="input-group">
+            <label>ExitSpeed (mph):</label>
+            <input type="number" id="inp-speed" step="0.1" placeholder="初速" value="116.8">
+        </div>
+        <div class="input-group">
+            <label>HitSpinRate (rpm):</label>
+            <input type="number" id="inp-spin" step="1" placeholder="未知" value="">
+        </div>
+        <div class="input-group">
+            <label>Bearing (°):</label>
+            <input type="number" id="inp-bearing" step="0.1" placeholder="方位角" value="-9.43">
+        </div>
+        <div class="input-group">
+            <label>Distance (m):</label>
+            <input type="number" id="inp-dist" step="0.1" placeholder="距離" value="137.12">
+        </div>
+        <div class="input-group">
+            <label>HangTime (s):</label>
+            <input type="number" id="inp-time" step="0.01" placeholder="滯空" value="">
+        </div>
+        <button id="btn-render" onclick="updateSimulation()">產生軌跡</button>
     </div>
 
     <script>
-        // --- 1. 解析與動態計算數據 ---
-        function parseUrlData() {
-            const params = new URLSearchParams(window.location.search);
-            
-            // 讀取基礎參數 (若無傳入則使用預設測量值)
-            const speedMph = parseFloat(params.get('speed')) || 116.8;
-            const angleDeg = parseFloat(params.get('la')) || 29.11;
-            const dirDeg = parseFloat(params.get('dir')) || -9.43;
-            const distM = parseFloat(params.get('dist')) || 137.12;
-            
-            // 轉速：有傳入才讀取，預設為 null (顯示未知)
-            const spin = params.has('spin') ? parseFloat(params.get('spin')) : null;
+        const g = 9.81; // 重力加速度
 
-            // 滯空時間計算 (若 URL 有 time 則優先採用，否則以物理公式估算)
-            let hangTime;
-            if (params.has('time')) {
-                hangTime = parseFloat(params.get('time'));
-            } else {
-                // 擊球初速 mph 轉 m/s (1 mph ≈ 0.44704 m/s)
-                const v0 = speedMph * 0.44704;
-                const radAngle = angleDeg * (Math.PI / 180);
-                const v0y = v0 * Math.sin(radAngle);
-                const g = 9.81;
-                // t = 2 * v0y / g (垂直方向拋物飛行時間)
-                hangTime = Math.max(0.5, (2 * v0y) / g);
+        // --- 1. 物理數據自動推算邏輯 ---
+        function calculateHitData() {
+            let angle = parseFloat(document.getElementById('inp-angle').value) || 0;
+            let dir = parseFloat(document.getElementById('inp-dir').value) || 0;
+            let speed = parseFloat(document.getElementById('inp-speed').value) || 0;
+            let spin = parseFloat(document.getElementById('inp-spin').value) || 0;
+            let bearing = parseFloat(document.getElementById('inp-bearing').value) || 0;
+            let dist = parseFloat(document.getElementById('inp-dist').value) || 0;
+            let time = parseFloat(document.getElementById('inp-time').value) || 0;
+
+            // 1. 方向角與落地方位角互相補全
+            if (!dir && bearing) dir = bearing;
+            if (!bearing && dir) bearing = dir;
+
+            // 2. 仰角若未填寫，自動設定預設值 15 度
+            if (!angle) angle = 15;
+
+            // 3. 初速 (mph) 與距離 (m) 的互相推算
+            if (!speed && dist && angle) {
+                // 由距離與仰角反推初速 v0 = sqrt(d * g / sin(2 * angle))
+                const radAngle = angle * (Math.PI / 180);
+                const sin2a = Math.sin(2 * radAngle);
+                if (sin2a > 0) {
+                    const v0_ms = Math.sqrt((dist * g) / sin2a);
+                    speed = v0_ms / 0.44704; // m/s 轉 mph
+                }
             }
 
+            if (!dist && speed && angle) {
+                // 由初速與仰角估計距離 d = v0^2 * sin(2 * angle) / g
+                const v0_ms = speed * 0.44704;
+                const radAngle = angle * (Math.PI / 180);
+                dist = (Math.pow(v0_ms, 2) * Math.sin(2 * radAngle)) / g;
+            }
+
+            // 4. 滯空時間 (s) 自動推算
+            if (!time && speed && angle) {
+                const v0_ms = speed * 0.44704;
+                const radAngle = angle * (Math.PI / 180);
+                const v0y = v0_ms * Math.sin(radAngle);
+                time = Math.max(0.5, (2 * v0y) / g);
+            }
+
+            // 反寫回 UI 介面，讓使用者看到自動估算的數據
+            document.getElementById('inp-angle').value = angle ? angle.toFixed(2) : '';
+            document.getElementById('inp-dir').value = dir ? dir.toFixed(2) : '';
+            document.getElementById('inp-speed').value = speed ? speed.toFixed(1) : '';
+            document.getElementById('inp-bearing').value = bearing ? bearing.toFixed(2) : '';
+            document.getElementById('inp-dist').value = dist ? dist.toFixed(2) : '';
+            document.getElementById('inp-time').value = time ? time.toFixed(2) : '';
+
             return {
-                speed: speedMph,
-                angle: angleDeg,
-                direction: dirDeg,
-                distance: distM,
-                hangTime: hangTime,
-                spinRate: spin
+                angle,
+                direction: dir,
+                speed,
+                spinRate: spin || null,
+                bearing,
+                distance: dist,
+                hangTime: time
             };
         }
-
-        const hitData = parseUrlData();
-
-        // 更新頂部文字數據
-        document.getElementById('val-speed').textContent = `${hitData.speed.toFixed(1)} mph`;
-        document.getElementById('val-angle').textContent = `${hitData.angle.toFixed(2)}°`;
-        document.getElementById('val-dir').textContent = `${hitData.direction.toFixed(2)}°`;
-        document.getElementById('val-dist').textContent = `${hitData.distance.toFixed(2)} m`;
-        document.getElementById('val-time').textContent = `${hitData.hangTime.toFixed(2)} s`;
-        document.getElementById('val-spin').textContent = hitData.spinRate !== null ? `${hitData.spinRate.toFixed(0)} rpm` : 'N/A';
 
         // --- 2. 初始化 Three.js 場景 ---
         const scene = new THREE.Scene();
@@ -129,17 +204,17 @@
         controls.enableDamping = true;
         controls.target.set(0, 0, -45);
 
-        // --- 3. 繪製極簡插畫風格棒球場 ---
+        // --- 3. 繪製極簡棒球場 ---
         const fieldGroup = new THREE.Group();
 
-        // 外野扇形草地 (半徑 120m)
+        // 外野草地
         const grassGeo = new THREE.RingGeometry(0, 120, 64, 1, Math.PI * 0.25, Math.PI * 0.5);
         const grassMat = new THREE.MeshBasicMaterial({ color: 0x598353, side: THREE.DoubleSide });
         const grass = new THREE.Mesh(grassGeo, grassMat);
         grass.rotation.x = -Math.PI / 2;
         fieldGroup.add(grass);
 
-        // 內野紅土扇形區
+        // 內野紅土區
         const dirtGeo = new THREE.RingGeometry(0, 28.9, 48, 1, Math.PI * 0.25, Math.PI * 0.5);
         const dirtMat = new THREE.MeshBasicMaterial({ color: 0xc1a173, side: THREE.DoubleSide });
         const dirt = new THREE.Mesh(dirtGeo, dirtMat);
@@ -183,59 +258,67 @@
         fieldGroup.add(homePlate);
 
         const baseGeo = new THREE.PlaneGeometry(1.2, 1.2);
-        
-        const base1 = new THREE.Mesh(baseGeo, whiteMat);
-        base1.rotation.x = -Math.PI / 2;
-        base1.rotation.z = Math.PI / 4;
-        base1.position.set(19.39, 0.04, -19.39);
-        fieldGroup.add(base1);
-
-        const base2 = new THREE.Mesh(baseGeo, whiteMat);
-        base2.rotation.x = -Math.PI / 2;
-        base2.rotation.z = Math.PI / 4;
-        base2.position.set(0, 0.04, -38.78);
-        fieldGroup.add(base2);
-
-        const base3 = new THREE.Mesh(baseGeo, whiteMat);
-        base3.rotation.x = -Math.PI / 2;
-        base3.rotation.z = Math.PI / 4;
-        base3.position.set(-19.39, 0.04, -19.39);
-        fieldGroup.add(base3);
+        [
+            { x: 19.39, z: -19.39 },
+            { x: 0, z: -38.78 },
+            { x: -19.39, z: -19.39 }
+        ].forEach(pos => {
+            const base = new THREE.Mesh(baseGeo, whiteMat);
+            base.rotation.x = -Math.PI / 2;
+            base.rotation.z = Math.PI / 4;
+            base.position.set(pos.x, 0.04, pos.z);
+            fieldGroup.add(base);
+        });
 
         scene.add(fieldGroup);
 
-        // --- 4. 擊球軌跡繪製 ---
-        const hitHeight = 1.0; // 固定擊球點高度：1.0 公尺
-        const radDir = hitData.direction * (Math.PI / 180);
-        const radAngle = hitData.angle * (Math.PI / 180);
-        const dist = hitData.distance;
+        // --- 4. 動態生成與繪製軌跡 ---
+        let trajectoryMesh, pinHead;
 
-        const endX = dist * Math.sin(radDir);
-        const endZ = -dist * Math.cos(radDir);
+        function updateSimulation() {
+            const data = calculateHitData();
 
-        const midX = endX / 2;
-        const midZ = endZ / 2;
+            // 若已有軌跡，先將舊的移除
+            if (trajectoryMesh) scene.remove(trajectoryMesh);
+            if (pinHead) scene.remove(pinHead);
 
-        const apexHeight = hitHeight + Math.max(1.5, dist * Math.sin(radAngle) * 0.45);
+            const hitHeight = 1.0; // 固定擊球高度 1 米
+            const radDir = data.direction * (Math.PI / 180);
+            const radAngle = data.angle * (Math.PI / 180);
+            const dist = data.distance;
 
-        const curve = new THREE.QuadraticBezierCurve3(
-            new THREE.Vector3(0, hitHeight, 0),
-            new THREE.Vector3(midX, apexHeight, midZ),
-            new THREE.Vector3(endX, 0.2, endZ)
-        );
+            const endX = dist * Math.sin(radDir);
+            const endZ = -dist * Math.cos(radDir);
 
-        // 拋物線本體
-        const tubeGeo = new THREE.TubeGeometry(curve, 60, 0.6, 8, false);
-        const tubeMat = new THREE.MeshBasicMaterial({ color: 0xee3f33 });
-        const trajectoryMesh = new THREE.Mesh(tubeGeo, tubeMat);
-        scene.add(trajectoryMesh);
+            const midX = endX / 2;
+            const midZ = endZ / 2;
 
-        // 落點紅球
-        const pinHeadGeo = new THREE.SphereGeometry(1.5, 32, 32);
-        const pinHeadMat = new THREE.MeshBasicMaterial({ color: 0xee3f33 });
-        const pinHead = new THREE.Mesh(pinHeadGeo, pinHeadMat);
-        pinHead.position.set(endX, 0.2, endZ);
-        scene.add(pinHead);
+            // 頂點高度計算
+            const apexHeight = hitHeight + Math.max(1.5, dist * Math.sin(radAngle) * 0.45);
+
+            // 建立 3D 曲線
+            const curve = new THREE.QuadraticBezierCurve3(
+                new THREE.Vector3(0, hitHeight, 0),
+                new THREE.Vector3(midX, apexHeight, midZ),
+                new THREE.Vector3(endX, 0.2, endZ)
+            );
+
+            // 繪製軌跡管線
+            const tubeGeo = new THREE.TubeGeometry(curve, 60, 0.6, 8, false);
+            const tubeMat = new THREE.MeshBasicMaterial({ color: 0xee3f33 });
+            trajectoryMesh = new THREE.Mesh(tubeGeo, tubeMat);
+            scene.add(trajectoryMesh);
+
+            // 落地點紅色球體
+            const pinHeadGeo = new THREE.SphereGeometry(1.5, 32, 32);
+            const pinHeadMat = new THREE.MeshBasicMaterial({ color: 0xee3f33 });
+            pinHead = new THREE.Mesh(pinHeadGeo, pinHeadMat);
+            pinHead.position.set(endX, 0.2, endZ);
+            scene.add(pinHead);
+        }
+
+        // 頁面載入後先執行一次
+        updateSimulation();
 
         // --- 5. 畫面響應與渲染迴圈 ---
         window.addEventListener('resize', () => {
