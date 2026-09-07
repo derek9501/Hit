@@ -55,7 +55,7 @@
 </head>
 <body>
 
-    <!-- 頂部數據展示列 -->
+    <!-- 頂部數據展示列 (速度單位：km/h) -->
     <div id="data-header">
         <div class="data-item">擊球初速:<span id="val-speed">-</span></div>
         <div class="data-item">仰角:<span id="val-angle">-</span></div>
@@ -69,14 +69,14 @@
     <script>
         const g = 9.81; // 重力加速度
 
-        // --- 1. 從 URL 讀取參數與自動推算邏輯 ---
+        // --- 1. 從 URL 讀取參數與自動推算邏輯 (以 km/h 運算) ---
         function parseUrlData() {
             const params = new URLSearchParams(window.location.search);
 
-            // 抓取網址輸入（若無傳入則設為 0 或 null）
+            // 抓取網址輸入
             let angle = parseFloat(params.get('la')) || 0;
             let dir = parseFloat(params.get('dir')) || 0;
-            let speed = parseFloat(params.get('speed')) || 0;
+            let speed = parseFloat(params.get('speed')) || 0; // km/h
             let spin = params.has('spin') && params.get('spin') !== '0' ? parseFloat(params.get('spin')) : null;
             let bearing = parseFloat(params.get('bearing')) || 0;
             let dist = parseFloat(params.get('dist')) || 0;
@@ -86,7 +86,7 @@
             if (!angle && !dir && !speed && !dist) {
                 angle = 29.11;
                 dir = -9.43;
-                speed = 116.8;
+                speed = 187.9; // 約 116.8 mph -> 187.9 km/h
                 dist = 137.12;
             }
 
@@ -97,25 +97,25 @@
             // 2. 仰角若為 0 或未填，預設給予 15 度
             if (!angle) angle = 15;
 
-            // 3. 初速 (mph) 與 飛行距離 (m) 自動互相推算
+            // 3. 初速 (km/h) 與 飛行距離 (m) 自動互相推算
             if (!speed && dist && angle) {
                 const radAngle = angle * (Math.PI / 180);
                 const sin2a = Math.sin(2 * radAngle);
                 if (sin2a > 0) {
                     const v0_ms = Math.sqrt((dist * g) / sin2a);
-                    speed = v0_ms / 0.44704; // m/s 轉 mph
+                    speed = v0_ms * 3.6; // m/s 轉 km/h
                 }
             }
 
             if (!dist && speed && angle) {
-                const v0_ms = speed * 0.44704;
+                const v0_ms = speed / 3.6; // km/h 轉 m/s
                 const radAngle = angle * (Math.PI / 180);
                 dist = (Math.pow(v0_ms, 2) * Math.sin(2 * radAngle)) / g;
             }
 
             // 4. 滯空時間 (s) 自動推算
             if (!time && speed && angle) {
-                const v0_ms = speed * 0.44704;
+                const v0_ms = speed / 3.6; // km/h 轉 m/s
                 const radAngle = angle * (Math.PI / 180);
                 const v0y = v0_ms * Math.sin(radAngle);
                 time = Math.max(0.5, (2 * v0y) / g);
@@ -134,8 +134,8 @@
 
         const hitData = parseUrlData();
 
-        // 渲染數據至頂部橫條
-        document.getElementById('val-speed').textContent = hitData.speed ? `${hitData.speed.toFixed(1)} mph` : 'N/A';
+        // 渲染數據至頂部橫條 (顯示 km/h)
+        document.getElementById('val-speed').textContent = hitData.speed ? `${hitData.speed.toFixed(1)} km/h` : 'N/A';
         document.getElementById('val-angle').textContent = hitData.angle ? `${hitData.angle.toFixed(2)}°` : 'N/A';
         document.getElementById('val-dir').textContent = hitData.direction ? `${hitData.direction.toFixed(2)}°` : 'N/A';
         document.getElementById('val-bearing').textContent = hitData.bearing ? `${hitData.bearing.toFixed(2)}°` : 'N/A';
