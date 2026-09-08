@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>棒球擊球軌跡 3D 模擬器 (全數據物理引擎版)</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background-color: #ffffff;
+        }
+
+        #data-header {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            background: rgba(255, 255, 255, 0.92);
+            backdrop-filter: blur(8px);
+            border-bottom: 1px solid #e5e7eb;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);
+            padding: 10px 0;
+            z-index: 10;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 12px 20px;
+        }
+
+        .data-item {
+            display: flex;
+            align-items: center;
+            font-size: 13px;
+            color: #4b5563;
+        }
+
+        .data-item span {
+            font-weight: bold;
+            color: #111827;
+            margin-left: 4px;
+            font-size: 14px;
+        }
+
+        canvas {
+            display: block;
+        }
+    </style>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+</head>
+<body>
+
+    <div id="data-header">
+        <div class="data-item">擊球初速:<span id="val-speed">-</span></div>
+        <div class="data-item">仰角:<span id="val-angle">-</span></div>
+        <div class="data-item">方向角:<span id="val-dir">-</span></div>
+        <div class="data-item">方位角:<span id="val-bearing">-</span></div>
+        <div class="data-item">飛行距離:<span id="val-dist">-</span></div>
+        <div class="data-item">滯空時間:<span id="val-time">-</span></div>
+        <div class="data-item">轉速:<span id="val-spin">-</span></div>
+    </div>
+
+    <script>
+        const g = 9.81; // 重力加速度 (m/s^2)
+        const rho = 1.225; // 空氣密度 (kg/m^3)
+        const mass = 0.145; // 棒球重量 (kg)
+        const radius = 0.037; // 棒球半徑 (m)
+        const area = Math.PI * radius * radius; // 截面積
+
+        // --- 1. 從 URL 讀取參數與補全估計 ---
+        function parseUrlData() {
+            const params = new URLSearchParams(window.location.search);
+
+            let angle = parseFloat(params.get('la')) || 0;
+            let dir = parseFloat(params.get('dir')) || 0;
+            let speed = parseFloat(params.get('speed')) || 0; // km/h
+            let spin = params.has('spin') && params.get('spin') !== '0' ? parseFloat(params.get('spin')) : null;
+            let bearing = parseFloat(params.get('bearing')) || 0;
+            let dist = parseFloat(params.get('dist')) || 0;
+            let time = parseFloat(params.get('time')) || 0;
+
+            // 預設示範數據 (若無傳入參數時)
+            if (!angle && !dir && !speed && !dist) {
+                speed = 117.8;
+                angle = 39.99;
+                dir = -13.41;
+                bearing = -24.17;
+                dist = 72.97;
+                time = 4.52;
+                spin = 3863;
+            }
+
+            // 方向角與方位角補全
+            if (!dir && bearing) dir = bearing;
+            if (!bearing && dir) bearing = dir;
+            if (!angle) angle = 20;
+
+            // 初速與距離交叉推論 (考慮空氣阻力的經驗係數)
+            if (!speed && dist && angle) {
+                const radA = angle * (Math.PI / 180);
+                const v0_ms = Math.sqrt((dist * g) / Math.sin(2 * radA)) * 1.35; // 包含空氣阻力修正
+                speed = v0_ms * 3.6;
+            }
+
+            if (!dist && speed && angle) {
+                const v0_ms = speed / 3.6;
+                const radA = angle * (Math.PI / 180);
+                dist = (Math.pow(v0_ms, 2) * Math.sin(2 * radA) / g) * 0.55; // 包含空氣阻力修正
+            }
+
+            // 滯空時間估算
+            if (!time && speed && angle) {
+                const v0_ms = speed / 3.6;
+                const radA = angle * (Math.PI / 180);
+                time = (2 * v0_ms * Math.sin(radA)) / g * 0.9;
+            }
+
+            return {
+                angle,
+                direction: dir,
+                speed,
+                spinRate: spin,
+                bearing,
+                distance: dist,
+                hangTime: time
+            };
+        }
+
+        const hitData = parseUrlData();
+
+        // UI 數據顯示
+        document.getElementById('val-speed').textContent = hitData.speed ? `${hitData.speed.toFixed(1)} km/h` : 'N/A';
+        document.getElementById('val-angle').textContent = hitData.angle ? `${hitData.angle.toFixed(2)}°` : 'N/A';
+        document.getElementById('val-dir').textContent = hitData.direction ? `${hitData.direction.toFixed(2)}°` : 'N/A';
+        document.getElementById('val-bearing').textContent = hitData.bearing ? `${hitData.bearing.toFixed(2)}°` : 'N/A';
+        document.getElementById('val-dist').textContent = hitData.distance ? `${hitData.distance.toFixed(2)} m` : 'N/A';
+        document.getElementById('val-time').textContent = hitData.hangTime ? `${hitData.hangTime.toFixed(2)} s` : 'N/A';
+        document.getElementById('val-spin').textContent = hitData.spinRate !== null ? `${hitData.spinRate.toFixed(0)} rpm` : 'N/A';
+
+        // --- 2. 空氣動力學物理軌跡引擎 ---
+        function generatePhysicalTrajectory(data) {
+            const points = [];
+            const dt = 0.015; // 時間步長 (s)
+            
+            const v0 = data.speed / 3.6; // 轉為 m/s
+            const radAngle = data.angle * (Math.PI / 180);
+            const radDir = data.direction * (Math.PI / 180);
+            const radBearing = data.bearing * (Math.PI / 180);
+
+            // 初始向量 (根據 Direction 出球)
+            let x = 0;
+            let y = 1.0; // 擊球高度 1 米
+            let z = 0;
+
+            let vx = v0 * Math.cos(radAngle) * Math.sin(radDir);
+            let vy = v0 * Math.sin(radAngle);
+            let vz = -v0 * Math.cos(radAngle) * Math.cos(radDir);
+
+            // 計算出球與落地的角度差，轉換為側向加速度 (馬格努斯力側飛效應)
+            const angleDiff = radBearing - radDir;
+            const sideAcceleration = angleDiff * 8.5; // 氣流側向力強度
+
+            // 阻力與升力係數
+            const Cd = 0.30; 
+            const Cl = data.spinRate ? Math.min(0.35, (data.spinRate / 3000) * 0.22) : 0.18;
+
+            points.push(new THREE.Vector3(x, y, z));
+
+            let currentTIme = 0;
+            const maxDuration = data.hangTime > 0 ? data.hangTime * 1.5 : 8.0;
+
+            while (y >= 0.15 && currentTIme < maxDuration) {
+                const v = Math.sqrt(vx * vx + vy * vy + vz * vz);
+                
+                // 1. 空氣阻力
+                const Fd = 0.5 * rho * v * v * Cd * area;
+                const ax_drag = -(Fd / mass) * (vx / v);
+                const ay_drag = -(Fd / mass) * (vy / v);
+                const az_drag = -(Fd / mass) * (vz / v);
+
+                // 2. 馬格努斯升力 (上旋/下旋)
+                const Fl = 0.5 * rho * v * v * Cl * area;
+                const ay_lift = (Fl / mass);
+
+                // 3. 馬格努斯側向力 (橫向側灣)
+                const ax_side = sideAcceleration * Math.abs(vz);
+
+                // 綜合加速度
+                const ax = ax_drag + ax_side;
+                const ay = -g + ay_drag + ay_lift;
+                const az = az_drag;
+
+                // 歐拉數值積分更新位置與速度
+                vx += ax * dt;
+                vy += ay * dt;
+                vz += az * dt;
+
+                x += vx * dt;
+                y += vy * dt;
+                z += vz * dt;
+
+                currentTIme += dt;
+                points.push(new THREE.Vector3(x, Math.max(0.2, y), z));
+            }
+
+            return { points, endPosition: new THREE.Vector3(x, 0.2, z) };
+        }
+
+        // --- 3. Three.js 場景建置 ---
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0xffffff);
+
+        const camera = new THREE.PerspectiveCamera(35, window.innerWidth / window.innerHeight, 0.1, 1000);
+        camera.position.set(0, 100, 120);
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(window.devicePixelRatio);
+        document.body.appendChild(renderer.domElement);
+
+        const controls = new THREE.OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+        controls.target.set(0, 0, -35);
+
+        // --- 4. 繪製球場 ---
+        const fieldGroup = new THREE.Group();
+
+        // 草皮
+        const grassGeo = new THREE.RingGeometry(0, 120, 64, 1, Math.PI * 0.25, Math.PI * 0.5);
+        const grassMat = new THREE.MeshBasicMaterial({ color: 0x598353, side: THREE.DoubleSide });
+        const grass = new THREE.Mesh(grassGeo, grassMat);
+        grass.rotation.x = -Math.PI / 2;
+        fieldGroup.add(grass);
+
+        // 紅土區
+        const dirtGeo = new THREE.RingGeometry(0, 28.9, 48, 1, Math.PI * 0.25, Math.PI * 0.5);
+        const dirtMat = new THREE.MeshBasicMaterial({ color: 0xc1a173, side: THREE.DoubleSide });
+        const dirt = new THREE.Mesh(dirtGeo, dirtMat);
+        dirt.rotation.x = -Math.PI / 2;
+        dirt.position.y = 0.01;
+        fieldGroup.add(dirt);
+
+        // 界線
+        const lineMat = new THREE.LineBasicMaterial({ color: 0xffffff, linewidth: 2 });
+        const rightLineGeo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0, 0.03, 0), new THREE.Vector3(85, 0.03, -85)]);
+        const leftLineGeo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0, 0.03, 0), new THREE.Vector3(-85, 0.03, -85)]);
+        fieldGroup.add(new THREE.Line(rightLineGeo, lineMat));
+        fieldGroup.add(new THREE.Line(leftLineGeo, lineMat));
+
+        // 投手丘與本壘板
+        const moundGeo = new THREE.CircleGeometry(2.75, 32);
+        const moundMat = new THREE.MeshBasicMaterial({ color: 0xc1a173, side: THREE.DoubleSide });
+        const mound = new THREE.Mesh(moundGeo, moundMat);
+        mound.rotation.x = -Math.PI / 2;
+        mound.position.set(0, 0.03, -18.44);
+        fieldGroup.add(mound);
+
+        const whiteMat = new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.DoubleSide });
+        const homePlateShape = new THREE.Shape();
+        homePlateShape.moveTo(0, 0);
+        homePlateShape.lineTo(0.5, -0.5);
+        homePlateShape.lineTo(0.5, -1.0);
+        homePlateShape.lineTo(-0.5, -1.0);
+        homePlateShape.lineTo(-0.5, -0.5);
+        const homePlate = new THREE.Mesh(new THREE.ShapeGeometry(homePlateShape), whiteMat);
+        homePlate.rotation.x = -Math.PI / 2;
+        homePlate.position.set(0, 0.04, 0);
+        fieldGroup.add(homePlate);
+
+        scene.add(fieldGroup);
+
+        // --- 5. 生成物理軌跡線段 ---
+        const trajectoryData = generatePhysicalTrajectory(hitData);
+        const curvePath = new THREE.CatmullRomCurve3(trajectoryData.points);
+
+        // 繪製彎曲管狀軌跡
+        const tubeGeo = new THREE.TubeGeometry(curvePath, 80, 0.5, 8, false);
+        const tubeMat = new THREE.MeshBasicMaterial({ color: 0xee3f33 });
+        const trajectoryMesh = new THREE.Mesh(tubeGeo, tubeMat);
+        scene.add(trajectoryMesh);
+
+        // 落地紅球標示點
+        const pinHeadGeo = new THREE.SphereGeometry(1.2, 32, 32);
+        const pinHeadMat = new THREE.MeshBasicMaterial({ color: 0xee3f33 });
+        const pinHead = new THREE.Mesh(pinHeadGeo, pinHeadMat);
+        pinHead.position.copy(trajectoryData.endPosition);
+        scene.add(pinHead);
+
+        // --- 6. 響應與渲染 ---
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        function animate() {
+            requestAnimationFrame(animate);
+            controls.update();
+            renderer.render(scene, camera);
+        }
+        animate();
+    </script>
+</body>
+</html>
